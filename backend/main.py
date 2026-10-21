@@ -1,3 +1,5 @@
+import httpx
+from fastapi import HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime, timezone
 
@@ -51,3 +53,58 @@ def get_latest_reading():
         return {"message": "No sensor readings received yet"}
 
     return latest_reading
+
+@app.get("/weather-forecast")
+async def get_weather_forecast():
+    latitude = 28.9845
+    longitude = 77.7064
+
+    url = "https://api.open-meteo.com/v1/forecast"
+
+    params = {
+        "latitude": latitude,
+        "longitude": longitude,
+        "hourly": "precipitation",
+        "forecast_hours": 4,
+        "timezone": "Asia/Kolkata",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(url, params=params)
+            response.raise_for_status()
+            data = response.json()
+
+        hourly = data.get("hourly", {})
+        times = hourly.get("time", [])
+        precipitation = hourly.get("precipitation", [])
+
+        if not times or len(times) != len(precipitation):
+            raise HTTPException(
+                status_code=502,
+                detail="Weather provider returned incomplete forecast data",
+            )
+
+        return {
+            "location": "Meerut",
+            "latitude": data.get("latitude"),
+            "longitude": data.get("longitude"),
+            "source": "Open-Meteo",
+            "forecast_type": "Hourly precipitation forecast",
+            "precipitation_unit": "mm",
+            "timezone": data.get("timezone", "Asia/Kolkata"),
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "hourly_forecast": [
+                {
+                    "time": time,
+                    "precipitation_mm": rainfall,
+                }
+                for time, rainfall in zip(times, precipitation)
+            ],
+        }
+
+    except httpx.HTTPError as error:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Weather provider request failed: {error}",
+        ) from error
